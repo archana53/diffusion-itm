@@ -25,6 +25,11 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+data/mscoco/
+data/coco_order/
+wandb/
+sample_training_logs/
+slurm_logs/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
