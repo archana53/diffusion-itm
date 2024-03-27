@@ -55,7 +55,7 @@ def main(args):
         scheduler = EulerDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
         model = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, scheduler=scheduler, torch_dtype=torch.float16)
     else:
-        model_id = "./stable-diffusion-v1-5"
+        model_id = "runwayml/stable-diffusion-v1-5"
         model = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
     model = model.to(accelerator.device)
     if args.lora_dir != '':
@@ -66,6 +66,12 @@ def main(args):
     dataloader = DataLoader(dataset, batch_size=args.batchsize, shuffle=False, num_workers=0)
 
     model, dataloader = accelerator.prepare(model, dataloader)
+
+    if args.load_from_ckpt != '':
+        try:
+            model.unet.load_state_dict(torch.load(input_model_file, map_location="cpu"), strict = False)
+        except:
+            print("Could not load model from checkpoint! Please verify the path and try again.")
 
     SKIP_NUMB = 9 if args.task == 'coco_order' else 3
 
@@ -215,6 +221,7 @@ if __name__ == '__main__':
     parser.add_argument('--lora_dir', type=str, default='')
     parser.add_argument('--guidance_scale', type=float, default=0.0)
     parser.add_argument('--targets', type=str, nargs='*', help="which target groups for mmbias",default='')
+    parser.add_argument('--load_from_ckpt', type = str, default = '')
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -244,6 +251,8 @@ if __name__ == '__main__':
             lora_type = "relativistic"
         elif "inferencelike" in args.lora_dir:
             lora_type = "inferencelike"
+
+        lora_type = "hard_neg1.0"
 
     args.run_id = f'{args.task}_diffusion_itm_{args.version}_seed{args.seed}_steps{args.sampling_steps}_subset{args.subset}{args.targets}_img_retrieval{args.img_retrieval}_{"lora_" + lora_type if args.lora_dir else ""}_gray{args.gray_baseline}'
     main(args)
