@@ -11,6 +11,9 @@ import argparse
 import json
 import random
 
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.cross_attention import LoRACrossAttnProcessor
+
 from datasets_loading import get_dataset
 from torch.utils.data import DataLoader
 from utils import evaluate_scores, save_bias_scores, save_bias_results
@@ -57,6 +60,26 @@ def main(args):
     else:
         model_id = "runwayml/stable-diffusion-v1-5"
         model = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
+        unet = model.unet
+        lora_attn_procs = {}
+        for name in unet.attn_processors.keys():
+            cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+            if name.startswith("mid_block"):
+                hidden_size = unet.config.block_out_channels[-1]
+            elif name.startswith("up_blocks"):
+                block_id = int(name[len("up_blocks.")])
+                hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+            elif name.startswith("down_blocks"):
+                block_id = int(name[len("down_blocks.")])
+                hidden_size = unet.config.block_out_channels[block_id]
+
+            lora_attn_procs[name] = LoRACrossAttnProcessor(
+                hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
+            )
+
+        unet.set_attn_processor(lora_attn_procs)
+        lora_layers = AttnProcsLayers(unet.attn_processors)
+
     model = model.to(accelerator.device)
     if args.lora_dir != '':
         model.unet.load_attn_procs(args.lora_dir)
@@ -67,11 +90,24 @@ def main(args):
 
     model, dataloader = accelerator.prepare(model, dataloader)
 
-    if args.load_from_ckpt != '':
-        try:
-            model.unet.load_state_dict(torch.load(input_model_file, map_location="cpu"), strict = False)
-        except:
-            print("Could not load model from checkpoint! Please verify the path and try again.")
+    def copy_model_parameters(model):
+        return {name: param.data.clone() for name, param in model.named_parameters()}
+
+    # Save original state of model parameters before loading checkpoint
+    original_parameters = copy_model_parameters(model.unet)
+    state_dict = torch.load(args.load_from_ckpt, map_location="cpu")
+    key_saved = state_dict.keys()
+    key_needed = model.unet.state_dict().keys()
+    key_changed = [f for f in key_needed if f in key_saved]
+
+    model.unet.load_state_dict(state_dict, strict = False)
+    for name, param in model.unet.named_parameters():
+        original_param = original_parameters[name]
+        if not torch.equal(param.data, original_param):
+            print(f"Parameter {name} has changed.")
+        else:
+            continue
+    print('Successfully loaded new model parameters!')
 
     SKIP_NUMB = 9 if args.task == 'coco_order' else 3
 
