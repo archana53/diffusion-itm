@@ -11,6 +11,10 @@ import argparse
 import json
 import random
 
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.cross_attention import LoRACrossAttnProcessor
+#from diffusers.models.attention_processor import LoRAAttnProcessor
+
 from datasets_loading import get_dataset
 from torch.utils.data import DataLoader
 from utils import evaluate_scores, save_bias_scores, save_bias_results
@@ -55,8 +59,36 @@ def main(args):
         scheduler = EulerDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
         model = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, scheduler=scheduler, torch_dtype=torch.float16)
     else:
-        model_id = "./stable-diffusion-v1-5"
+        model_id = "runwayml/stable-diffusion-v1-5"
+        # our_unet = UNet2DConditionModel.from_pretrained(
+        #     args.load_from_ckpt
+        # )
         model = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
+        #model.from_ckpt(args.load_from_ckpt)
+        unet = model.unet
+        lora_attn_procs = {}
+
+        #print(type(unet.attn_processors))
+
+        lora_attn_procs = {}
+        for name in unet.attn_processors.keys():
+            cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+            if name.startswith("mid_block"):
+                hidden_size = unet.config.block_out_channels[-1]
+            elif name.startswith("up_blocks"):
+                block_id = int(name[len("up_blocks.")])
+                hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+            elif name.startswith("down_blocks"):
+                block_id = int(name[len("down_blocks.")])
+                hidden_size = unet.config.block_out_channels[block_id]
+
+            lora_attn_procs[name] = LoRACrossAttnProcessor(
+                hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
+            )
+
+        unet.set_attn_processor(lora_attn_procs)
+        #unet.enable_xformers_memory_efficient_attention()
+
     model = model.to(accelerator.device)
     if args.lora_dir != '':
         model.unet.load_attn_procs(args.lora_dir)
@@ -67,8 +99,69 @@ def main(args):
 
     model, dataloader = accelerator.prepare(model, dataloader)
 
-    SKIP_NUMB = 9 if args.task == 'coco_order' else 3
+    def copy_model_parameters(model):
+        return {name: param.data.clone() for name, param in model.named_parameters()}
+        
 
+    # Save original state of model parameters before loading checkpoint
+    original_parameters = copy_model_parameters(model.unet)
+    state_dict = torch.load(args.load_from_ckpt, map_location="cpu")
+    # our keys
+    key_saved = state_dict.keys()
+    # the base model keys
+    key_needed = model.unet.state_dict().keys()
+    
+    key_common = [f for f in key_needed if f in key_saved]
+
+    print(len(key_saved), len(key_needed))
+    print(len(key_common))
+
+    print("common keys", key_common)
+
+    ## Debugging
+    test_param_name = "up_blocks.3.attentions.2.transformer_blocks.0.attn2.processor.to_k_lora.down.weight"
+    print(test_param_name)
+    print("Shape", state_dict[test_param_name].cpu().shape, model.unet.state_dict()[test_param_name].cpu().shape)
+    print(
+       state_dict[test_param_name].cpu()[0, :].mean(), 
+       model.unet.state_dict()[test_param_name].cpu()[0, :].mean()
+    )
+    print(
+       state_dict[test_param_name].cpu()[0, :].std(), 
+       model.unet.state_dict()[test_param_name].cpu()[0, :].std()
+    )
+
+    changed_params = []
+    same_params = []
+
+    #subset_state_dict = {k: state_dict[k] for k in key_common}
+    model.unet.load_state_dict(state_dict, strict = False)
+
+    # test_param_name = "down_blocks.0.attentions.0.transformer_blocks.0.attn1.processor.to_q_lora.down.weight"
+    # old_sd = {name: param.data for name, param in model.unet.named_parameters()}
+    # old_sd[test_param_name] += 4
+    # model.unet.load_state_dict(old_sd, strict=False)
+
+    for name, param in model.unet.named_parameters():
+        original_param = original_parameters[name]
+        if not torch.equal(param.data, original_param):
+            #print(f"Parameter {name} has changed.")
+            changed_params.append(name)
+        else:
+            #print(f"Parameter {name} remains the same.")
+            same_params.append(name)
+
+    print("Changed Params:", len(changed_params))
+    print(*changed_params, sep='\n')
+
+    print("Same Params", len(same_params))
+    print(*same_params, sep='\n')
+
+    print('Successfully loaded new model parameters!')
+
+
+    SKIP_NUMB = 9 if args.task == 'coco_order' else 3
+    #return
     r1s = []
     r5s = []
     max_more_than_onces = 0
@@ -215,6 +308,7 @@ if __name__ == '__main__':
     parser.add_argument('--lora_dir', type=str, default='')
     parser.add_argument('--guidance_scale', type=float, default=0.0)
     parser.add_argument('--targets', type=str, nargs='*', help="which target groups for mmbias",default='')
+    parser.add_argument('--load_from_ckpt', type = str, default = '')
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -244,6 +338,8 @@ if __name__ == '__main__':
             lora_type = "relativistic"
         elif "inferencelike" in args.lora_dir:
             lora_type = "inferencelike"
+
+        lora_type = "hard_neg1.0"
 
     args.run_id = f'{args.task}_diffusion_itm_{args.version}_seed{args.seed}_steps{args.sampling_steps}_subset{args.subset}{args.targets}_img_retrieval{args.img_retrieval}_{"lora_" + lora_type if args.lora_dir else ""}_gray{args.gray_baseline}'
     main(args)

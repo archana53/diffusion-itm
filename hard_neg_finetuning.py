@@ -378,7 +378,7 @@ def score_batch(i, args, batch, model, img_retrieval=False):
             dists = model(
                 prompt=list(text),
                 image=resized_img,
-                scoring=True,
+                #scoring=True,
                 guidance_scale=0.0,
                 sampling_steps=4,
                 unconditional=img_retrieval,
@@ -770,6 +770,10 @@ def main():
 
         for step, batch in enumerate(train_dataloader):
 
+            neg_img_ = False
+            hard_neg_ = False
+            rand_neg_ = False
+
             if args.mixed_neg:
                 neg_img_ = False
                 hard_neg_ = False
@@ -781,6 +785,11 @@ def main():
                         hard_neg_ = True
                     else:
                         rand_neg_ = True
+            elif args.hard_neg:
+                neg_img_ = False
+                hard_neg_ = True
+                rand_neg_ = False
+
 
             # Skip steps until we reach the resumed step
             if (
@@ -1077,93 +1086,93 @@ def main():
                     logger.info(f"Saving model checkpoint to {save_path}")
                     accelerator.save_state(save_path)
                     ############ QUANTITAIVE EVALUATION #############
-                    pipeline_img2img = (
-                        StableDiffusionImg2ImgPipeline.from_pretrained(
-                            args.pretrained_model_name_or_path,
-                            unet=accelerator.unwrap_model(unet),
-                            revision=args.revision,
-                            torch_dtype=weight_dtype,
-                        )
-                    )
-                    pipeline_img2img = pipeline_img2img.to(accelerator.device)
-                    pipeline_img2img.set_progress_bar_config(disable=True)
+                    # pipeline_img2img = (
+                    #     StableDiffusionImg2ImgPipeline.from_pretrained(
+                    #         args.pretrained_model_name_or_path,
+                    #         unet=accelerator.unwrap_model(unet),
+                    #         revision=args.revision,
+                    #         torch_dtype=weight_dtype,
+                    #     )
+                    # )
+                    # pipeline_img2img = pipeline_img2img.to(accelerator.device)
+                    # pipeline_img2img.set_progress_bar_config(disable=True)
 
-                    metrics = []
-                    max_more_than_onces = 0
-                    for k, batch in tqdm(
-                        enumerate(val_dataloader), total=len(val_dataloader)
-                    ):
-                        if k % 15 != 0:
-                            continue
-                        # measure time for the following line
-                        scores = score_batch(k, args, batch, pipeline_img2img)
+                    # metrics = []
+                    # max_more_than_onces = 0
+                    # for k, batch in tqdm(
+                    #     enumerate(val_dataloader), total=len(val_dataloader)
+                    # ):
+                    #     if k % 15 != 0:
+                    #         continue
+                    #     # measure time for the following line
+                    #     scores = score_batch(k, args, batch, pipeline_img2img)
 
-                        args.task = "mscoco_val"
-                        acc, max_more_than_once = evaluate_scores(
-                            args, scores, batch
-                        )
-                        metrics += acc
-                        acc = sum(metrics) / len(metrics)
-                        max_more_than_onces += max_more_than_once
-                        print(f"MSCOCO Val Accuracy Txt: {acc}")
-                        print(f"Max more than once: {max_more_than_onces}")
-                        with open(f"{save_path}/results_txt.txt", "w") as f:
-                            f.write(f"MSCOCO Val Accuracy Txt: {acc}\n")
-                            f.write(
-                                f"Max more than once: {max_more_than_onces}\n"
-                            )
-                            f.write(f"Sample size {len(metrics)}\n")
-                    wandb.log(
-                        {
-                            "MSCOCO Val Accuracy Txt": acc,
-                            "Max more than once": max_more_than_onces,
-                        }
-                    )
-                    txt_acc = acc
+                    #     args.task = "mscoco_val"
+                    #     acc, max_more_than_once = evaluate_scores(
+                    #         args, scores, batch
+                    #     )
+                    #     metrics += acc
+                    #     acc = sum(metrics) / len(metrics)
+                    #     max_more_than_onces += max_more_than_once
+                    #     print(f"MSCOCO Val Accuracy Txt: {acc}")
+                    #     print(f"Max more than once: {max_more_than_onces}")
+                    #     with open(f"{save_path}/results_txt.txt", "w") as f:
+                    #         f.write(f"MSCOCO Val Accuracy Txt: {acc}\n")
+                    #         f.write(
+                    #             f"Max more than once: {max_more_than_onces}\n"
+                    #         )
+                    #         f.write(f"Sample size {len(metrics)}\n")
+                    # wandb.log(
+                    #     {
+                    #         "MSCOCO Val Accuracy Txt": acc,
+                    #         "Max more than once": max_more_than_onces,
+                    #     }
+                    # )
+                    # txt_acc = acc
 
-                    metrics = []
-                    max_more_than_onces = 0
-                    for k, batch in tqdm(
-                        enumerate(val_dataloader2), total=len(val_dataloader2)
-                    ):
-                        if k % 15 != 0:
-                            continue
-                        # measure time for the following line
-                        scores = score_batch(
-                            k,
-                            args,
-                            batch,
-                            pipeline_img2img,
-                            img_retrieval=True,
-                        )
+                    # metrics = []
+                    # max_more_than_onces = 0
+                    # for k, batch in tqdm(
+                    #     enumerate(val_dataloader2), total=len(val_dataloader2)
+                    # ):
+                    #     if k % 15 != 0:
+                    #         continue
+                    #     # measure time for the following line
+                    #     scores = score_batch(
+                    #         k,
+                    #         args,
+                    #         batch,
+                    #         pipeline_img2img,
+                    #         img_retrieval=True,
+                    #     )
 
-                        args.task = "mscoco_val"
-                        acc, max_more_than_once = evaluate_scores(
-                            args, scores, batch
-                        )
-                        metrics += acc
-                        acc = sum(metrics) / len(metrics)
-                        max_more_than_onces += max_more_than_once
-                        print(f"MSCOCO Val Accuracy Img: {acc}")
-                        print(f"Max more than once: {max_more_than_onces}")
-                        with open(f"{save_path}/results_txt.txt", "w") as f:
-                            f.write(f"MSCOCO Val Accuracy Img: {acc}\n")
-                            f.write(
-                                f"Max more than once: {max_more_than_onces}\n"
-                            )
-                            f.write(f"Sample size {len(metrics)}\n")
-                    wandb.log(
-                        {
-                            "MSCOCO Val Accuracy Img": acc,
-                            "Max more than once": max_more_than_onces,
-                        }
-                    )
-                    img_acc = acc
-                    wandb.log(
-                        {"Overall Val Accuracy": (txt_acc + img_acc) / 2}
-                    )
+                    #     args.task = "mscoco_val"
+                    #     acc, max_more_than_once = evaluate_scores(
+                    #         args, scores, batch
+                    #     )
+                    #     metrics += acc
+                    #     acc = sum(metrics) / len(metrics)
+                    #     max_more_than_onces += max_more_than_once
+                    #     print(f"MSCOCO Val Accuracy Img: {acc}")
+                    #     print(f"Max more than once: {max_more_than_onces}")
+                    #     with open(f"{save_path}/results_txt.txt", "w") as f:
+                    #         f.write(f"MSCOCO Val Accuracy Img: {acc}\n")
+                    #         f.write(
+                    #             f"Max more than once: {max_more_than_onces}\n"
+                    #         )
+                    #         f.write(f"Sample size {len(metrics)}\n")
+                    # wandb.log(
+                    #     {
+                    #         "MSCOCO Val Accuracy Img": acc,
+                    #         "Max more than once": max_more_than_onces,
+                    #     }
+                    # )
+                    # img_acc = acc
+                    # wandb.log(
+                    #     {"Overall Val Accuracy": (txt_acc + img_acc) / 2}
+                    # )
 
-                    del pipeline_img2img
+                    # del pipeline_img2img
                     torch.cuda.empty_cache()
 
                 # elif False global_step % args.checkpointing_steps == 450 and accelerator.is_main_process:

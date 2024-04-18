@@ -447,7 +447,7 @@ class WinogroundDataset(Dataset):
     def __init__(self, root_dir, transform, resize=512, scoring_only=False):
         self.examples = load_dataset(
             "facebook/winoground",
-            use_auth_token="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",
+            use_auth_token="AUTH_TOKEN_HERE",
         )
         self.resize = resize
         self.transform = transform
@@ -559,9 +559,9 @@ class MSCOCODataset(Dataset):
         hard_neg=True,
         neg_img=False,
         mixed_neg=False,
-        tsv_path="aro/temp_data/train_neg_clip_old.tsv",
+        tsv_path="aro/temp_data/train_neg_clip.tsv",
     ):
-        self.root_dir = "data/mscoco/train2014"
+        self.root_dir = "/content/drive/MyDrive/MSCOCO/train2014"
         self.resize = resize
         self.data = pd.read_csv(tsv_path, delimiter="\t")
         self.all_texts = self.data["title"].tolist()
@@ -584,7 +584,7 @@ class MSCOCODataset(Dataset):
         if "train2014" in img_path:
             img_path = f"{self.root_dir}/{img_path}"
         else:
-            img_path = f"data/coco_order/val2014/{img_path}"
+            img_path = f"/content/drive/MyDrive/MSCOCO/val2014/{img_path}"
         text = row["title"]
         neg_captions = ast.literal_eval(row["neg_caption"])
         neg_caption = neg_captions[np.random.randint(0, len(neg_captions))]
@@ -599,7 +599,7 @@ class MSCOCODataset(Dataset):
             if "train2014" in path:
                 path = f"{self.root_dir}/{path}"
             else:
-                path = f"data/coco_order/val2014/{path}"
+                path = f"/content/drive/MyDrive/MSCOCO/val2014/{path}"
             new_neg_paths.append(path)
         neg_paths = new_neg_paths
 
@@ -693,7 +693,7 @@ class ValidMSCOCODataset(Dataset):
         tsv_path="aro/temp_data/valid_neg_clip.tsv",
         neg_img=False,
     ):
-        self.root_dir = "data/mscoco/"
+        self.root_dir = "/content/drive/MyDrive/MSCOCO/"
         self.resize = resize
         self.data = pd.read_csv(tsv_path, delimiter="\t")
         self.transform = transform
@@ -712,7 +712,7 @@ class ValidMSCOCODataset(Dataset):
         img_path = row["filepath"]
         # only get filename
         img_path = img_path.split("/")[-1]
-        img_path = f"data/coco_order/val2014/{img_path}"
+        img_path = f"/content/drive/MyDrive/MSCOCO/val2014/{img_path}"
         text = row["title"]
         if self.hard_neg:
             neg_captions = ast.literal_eval(row["neg_caption"])
@@ -729,7 +729,7 @@ class ValidMSCOCODataset(Dataset):
             if "train2014" in path:
                 path = f"{self.root_dir}/{path}"
             else:
-                path = f"data/coco_order/val2014/{path}"
+                path = f"/content/drive/MyDrive/MSCOCO/val2014/{path}"
             new_neg_paths.append(path)
         neg_paths = new_neg_paths
 
